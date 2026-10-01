@@ -1,5 +1,7 @@
 # CardVault
 
+Cardvault is an outline of the final project which values your specific card using PSA and eBay's API to fetch data accurately.
+
 Evaluate any Topps / Bowman sports card (baseball, basketball, football, soccer) with
 evidence-backed ratings and a value estimate.
 

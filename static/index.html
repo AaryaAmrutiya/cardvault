@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CardVault</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="CardVault home">
+      <span class="brand-mark">CV</span>
+      <span class="brand-name">Card<span>Vault</span></span>
+    </a>
+    <div class="status" id="status" aria-label="Data source status"></div>
+    <button class="btn-ghost" id="openSetup" type="button">Setup</button>
+  </header>
+
+  <main>
+    <section class="hero" id="hero">
+      <p class="eyebrow">Topps sports card evaluator</p>
+      <h1>Know what your card is <em>really</em> worth.</h1>
+      <p class="lede">Search any Topps or Bowman card across baseball, basketball, football and soccer. Every rating is backed by live market data, grading populations and player records, and you can see the evidence behind each one.</p>
+    </section>
+
+    <form class="panel search" id="searchForm" autocomplete="off">
+      <div class="sports" role="tablist" aria-label="Sport">
+        <button type="button" role="tab" data-sport="baseball" aria-selected="true">⚾ Baseball</button>
+        <button type="button" role="tab" data-sport="basketball" aria-selected="false">🏀 Basketball</button>
+        <button type="button" role="tab" data-sport="football" aria-selected="false">🏈 Football</button>
+        <button type="button" role="tab" data-sport="soccer" aria-selected="false">⚽ Soccer</button>
+      </div>
+
+      <div class="grid">
+        <label class="field span-2">
+          <span>Player <b>*</b></span>
+          <input name="player" required placeholder="Mike Trout">
+        </label>
+        <label class="field">
+          <span>Year</span>
+          <input name="year" placeholder="2011" inputmode="numeric">
+        </label>
+        <label class="field span-2">
+          <span>Set</span>
+          <input name="set" list="setList" placeholder="Topps Update">
+          <datalist id="setList"></datalist>
+        </label>
+        <label class="field">
+          <span>Card #</span>
+          <input name="number" placeholder="US175">
+        </label>
+        <label class="field span-2">
+          <span>Parallel / variation <i>optional</i></span>
+          <input name="parallel" placeholder="e.g. Gold /50, Refractor, 1/1">
+        </label>
+        <label class="field">
+          <span>Condition</span>
+          <select name="company">
+            <option value="RAW">Raw (ungraded)</option>
+            <option value="PSA">PSA</option>
+            <option value="BGS">BGS (Beckett)</option>
+            <option value="SGC">SGC</option>
+            <option value="CGC">CGC</option>
+          </select>
+        </label>
+        <label class="field" id="gradeField" hidden>
+          <span>Grade</span>
+          <select name="grade"></select>
+        </label>
+      </div>
+
+      <div class="toggles">
+        <label class="chip-toggle"><input type="checkbox" name="rookie"><span>Rookie card (RC)</span></label>
+        <label class="chip-toggle"><input type="checkbox" name="auto"><span>Autograph</span></label>
+      </div>
+
+      <details class="more">
+        <summary>More evidence <span>PSA cert lookup · your own sold prices</span></summary>
+        <div class="more-body">
+          <label class="field">
+            <span>PSA cert number <i>for graded cards: pulls the official population report</i></span>
+            <input name="cert" placeholder="e.g. 12345678" inputmode="numeric">
+          </label>
+          <label class="field">
+            <span>Recent sold prices <i>one per line: price and optional date</i></span>
+            <textarea name="manual" rows="4" placeholder="245.00  2026-09-14&#10;$230  9/02/2026&#10;262.50"></textarea>
+            <small>Find these on eBay: search your card, then tick <b>Sold Items</b> in the filters. Only enter sales of the same card in the same condition.</small>
+          </label>
+        </div>
+      </details>
+
+      <div class="actions">
+        <button class="btn-primary" type="submit" id="submitBtn">
+          <span>Evaluate card</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </button>
+        <p class="hint" id="formHint"></p>
+      </div>
+    </form>
+
+    <section class="loading panel" id="loading" hidden aria-live="polite">
+      <div class="loader-card" aria-hidden="true"></div>
+      <ol id="loadingSteps"></ol>
+    </section>
+
+    <div class="alerts" id="alerts" aria-live="polite"></div>
+
+    <section id="results" hidden></section>
+  </main>
+
+  <footer class="foot">
+    <p>CardVault gives data-driven estimates, not professional appraisals. Not affiliated with or endorsed by Topps, eBay, PSA or any league.</p>
+  </footer>
+
+  <dialog id="setup" class="setup">
+    <form method="dialog" class="setup-inner">
+      <header>
+        <h2>Connect your data sources</h2>
+        <button class="close" value="close" aria-label="Close">✕</button>
+      </header>
+      <div id="setupStatus" class="setup-status"></div>
+      <ol class="setup-steps">
+        <li>
+          <h3>eBay: live prices, demand, liquidity</h3>
+          <p>Sign in at <b>developer.ebay.com</b> → <b>Application Keysets</b> → create a <b>Production</b> keyset. When asked about Marketplace Account Deletion, choose the exemption (this app doesn't store eBay user data). Copy the <b>App ID</b> and <b>Cert ID</b>.</p>
+          <p class="muted">Optional: ask eBay for <b>Marketplace Insights</b> access to unlock real sold prices.</p>
+        </li>
+        <li>
+          <h3>PSA: grading population</h3>
+          <p>Your token goes in <code>PSA_API_TOKEN</code>. PSA must also approve your account for API access. If PSA shows as "awaiting approval", email <b>collectors-apis@collectors.com</b> and ask them to enable Public API access for your account.</p>
+        </li>
+        <li>
+          <h3>Add the keys</h3>
+          <p>Open <code>cardvault\.env</code> in VS Code, paste each key after its <code>=</code>, save, then close and re-open <code>start.bat</code>.</p>
+        </li>
+      </ol>
+      <p class="muted">Player data (Wikipedia, Wikidata, MLB Stats API) is free and needs no setup.</p>
+    </form>
+  </dialog>
+
+  <script src="scoring.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

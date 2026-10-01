@@ -8,7 +8,7 @@ evidence-backed ratings and a value estimate.
 ## Run it
 
 Double-click `start.bat` (or run `python server.py`). Your browser opens at
-http://127.0.0.1:8765. Close the black window to stop the app.
+[http://127.0.0.1:8765](https://cardvault-3v3v.onrender.com/). Close the black window to stop the app.
 
 ## Data sources
 

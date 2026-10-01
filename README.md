@@ -1,4 +1,4 @@
-# CardVault
+# CardVault Outline
 
 Cardvault is an outline of the final project which values your specific card using PSA and eBay's API to fetch data accurately.
 

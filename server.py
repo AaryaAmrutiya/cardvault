@@ -523,7 +523,7 @@ def main():
     server = None
     for candidate in range(port, port + 20):
         try:
-            server = ThreadingHTTPServer(("127.0.0.1", candidate), Handler)
+            server = ThreadingHTTPServer((cfg("HOST", "127.0.0.1"), candidate), Handler)
             port = candidate
             break
         except OSError:

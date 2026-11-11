@@ -241,6 +241,265 @@ def ebay_sold(qs):
     return {"available": True, "query": q, "total": res.get("total", len(sales)), "items": sales}
 
 
+# ---------------------------------------------------------------- The Card API (sold prices)
+
+CARDAPI_BASE = "https://thecardapi.com/api/v1/market"
+CARDAPI_LIMIT = 200  # rows per search; the free plan allows 5,000 rows a day
+GOLDIN_PREMIUM = 1.22  # Goldin reports hammer price; buyers pay ~22% on top
+BUYING_TYPES = {"auction": "AUCTION", "fixed_price": "FIXED_PRICE", "best_offer": "BEST_OFFER"}
+
+
+def cardapi_configured():
+    return bool(cfg("CARD_API_KEY"))
+
+
+def cardapi_get(params):
+    url = f"{CARDAPI_BASE}/sales?" + urllib.parse.urlencode(params)
+    try:
+        return fetch_json(url, {"x-market-api-key": cfg("CARD_API_KEY")}, timeout=40)
+    except UpstreamError as e:
+        if e.status in (401, 403):
+            raise UpstreamError(e.status, "The Card API rejected the key in CARD_API_KEY.")
+        if e.status == 429:
+            raise UpstreamError(429, "The Card API's daily limit (5,000 sale rows) has been reached. It resets at midnight UTC.")
+        raise
+
+
+def cardapi_window():
+    """Oldest sale date the plan can see, so sales counts can be stated per day."""
+    hit = CACHE.get("cardapi:window")
+    if hit:
+        return hit
+    res = cardapi_get({"limit": 1, "sort": "date_asc"})
+    rows = res.get("data") or []
+    oldest = rows[0].get("sale_date") if rows else None
+    CACHE.set("cardapi:window", oldest, 6 * 3600)
+    return oldest
+
+
+def cardapi_sold(qs):
+    q = require(qs, "q")
+    if not cardapi_configured():
+        return {"available": False, "reason": "The Card API key is not configured."}
+    res = cardapi_get({"q": q, "limit": CARDAPI_LIMIT, "sort": "date_desc"})
+    sales = []
+    for it in res.get("data") or []:
+        price = it.get("price")
+        if not isinstance(price, (int, float)) or price <= 0 or it.get("currency", "USD") != "USD":
+            continue
+        platform = it.get("platform") or ""
+        title = it.get("title", "")
+        if platform.lower() == "goldin":
+            price = round(price * GOLDIN_PREMIUM, 2)
+            title += " (Goldin, incl. ~22% buyer's premium)"
+        image = it.get("image_url") or it.get("thumbnail_url")
+        sales.append({
+            "title": title,
+            "price": price,
+            "currency": "USD",
+            "date": it.get("sale_date"),
+            "qty": 1,
+            "url": it.get("listing_url"),
+            "image": image,
+            "buying": [BUYING_TYPES[it["listing_type"]]] if it.get("listing_type") in BUYING_TYPES else [],
+            "bids": it.get("bids") or 0,
+            "platform": platform,
+        })
+    pag = res.get("pagination") or {}
+    oldest = cardapi_window()
+    days = None
+    if oldest:
+        days = (datetime.now(timezone.utc).date() - datetime.strptime(oldest, "%Y-%m-%d").date()).days + 1
+    return {
+        "available": True, "query": q, "total": pag.get("total", len(sales)), "items": sales,
+        "truncated": bool(pag.get("has_more")), "windowFrom": oldest, "windowDays": days,
+    }
+
+
+# ---------------------------------------------------------------- TCG API (trading card games)
+
+TCGAPI_BASE = "https://api.tcgapi.dev/v1"
+# TCG API lists supplies and merchandise as "games"; the TCG page only shows card games.
+TCG_NOT_CARDS = {
+    "books", "bulk-lots", "card-sleeves", "card-storage-tins", "collectible-storage", "deck-boxes",
+    "d-and-d-miniatures", "funko", "heroclix", "life-counters", "playmats", "protective-pages",
+    "storage-albums", "supply-bundles", "tcgplayer", "tcgplayer-supplies",
+}
+_tcg_quota = {}
+
+
+def tcgapi_configured():
+    return bool(cfg("TCGAPI_KEY"))
+
+
+def tcg_get(path, params=None, ttl=6 * 3600, keyed=True):
+    """GET from TCG API with a per-URL cache. The free plan allows 100 keyed requests a day."""
+    url = f"{TCGAPI_BASE}{path}" + ("?" + urllib.parse.urlencode(params) if params else "")
+    hit = CACHE.get("tcg:" + url)
+    if hit is not None:
+        return hit
+    headers = {}
+    if keyed:
+        if not tcgapi_configured():
+            raise UpstreamError(503, "The TCG API key is not configured (TCGAPI_KEY in .env).")
+        headers["X-API-Key"] = cfg("TCGAPI_KEY")
+    try:
+        try:
+            res = fetch_json(url, headers)
+        except UpstreamError as e:
+            # Connection failures never reach the API, so one retry costs no quota.
+            if e.status not in (502, 504) or "Could not reach" not in str(e) and "timed out" not in str(e):
+                raise
+            time.sleep(1)
+            res = fetch_json(url, headers)
+    except UpstreamError as e:
+        if e.status == 429:
+            raise UpstreamError(429, "TCG API's daily limit (100 lookups on the free plan) has been reached. "
+                                     "It resets at midnight UTC; cards you already opened today still work.")
+        if e.status == 401:
+            raise UpstreamError(401, "TCG API rejected the key in TCGAPI_KEY.")
+        if e.status == 403:
+            raise UpstreamError(403, "This TCG API feature needs a paid plan.")
+        raise
+    if res.get("rate_limit"):
+        _tcg_quota.update(res["rate_limit"])
+    CACHE.set("tcg:" + url, res, ttl)
+    return res
+
+
+def _clean_card_name(card):
+    # Some products carry their number in the name ("Masquerain - 003/103").
+    name = card.get("name") or ""
+    number = card.get("number")
+    if number and name.endswith(f" - {number}"):
+        name = name[: -len(number) - 3]
+    return name
+
+
+def _tcg_card_row(card, set_name=None):
+    return {
+        "id": card.get("id"),
+        "name": _clean_card_name(card),
+        "number": card.get("number"),
+        "rarity": card.get("rarity"),
+        "image": card.get("image_url"),
+        "tcgplayerId": card.get("tcgplayer_id"),
+        "printing": card.get("printing"),
+        "market": card.get("market_price"),
+        "low": card.get("low_price"),
+        "median": card.get("median_price"),
+        "listings": card.get("total_listings"),
+        "set": card.get("set_name") or set_name,
+    }
+
+
+def _tcg_page(res):
+    meta = res.get("meta") or {}
+    return {"total": meta.get("total"), "page": meta.get("page", 1), "hasMore": bool(meta.get("has_more"))}
+
+
+def tcg_games(_qs):
+    games, page = [], 1
+    while True:
+        res = tcg_get("/games", {"page": page, "per_page": 100}, ttl=24 * 3600, keyed=False)
+        games += res.get("data") or []
+        if not (res.get("meta") or {}).get("has_more") or page >= 5:
+            break
+        page += 1
+    out = [{
+        "slug": g.get("slug"),
+        "name": g.get("name"),
+        "sets": g.get("set_count"),
+        "cards": g.get("card_count"),
+        "logo": g.get("logo_url"),
+    } for g in games if g.get("slug") not in TCG_NOT_CARDS]
+    out.sort(key=lambda g: (g["name"] or "").casefold())
+    return {"games": out}
+
+
+def tcg_sets(qs):
+    game = require(qs, "game")
+    res = tcg_get(f"/games/{urllib.parse.quote(game)}/sets",
+                  {"page": qs.get("page", "1"), "per_page": 60}, ttl=24 * 3600, keyed=False)
+    sets = [{
+        "id": s.get("id"),
+        "name": s.get("name"),
+        "released": s.get("release_date"),
+        "cards": s.get("card_count"),
+        "image": s.get("image_url"),
+        "icon": s.get("set_icon_url"),
+    } for s in res.get("data") or []]
+    return {"sets": sets, **_tcg_page(res)}
+
+
+def tcg_set_cards(qs):
+    set_id = require(qs, "set")
+    res = tcg_get(f"/sets/{urllib.parse.quote(set_id)}/cards",
+                  {"page": qs.get("page", "1"), "per_page": 100, "type": "Cards"}, ttl=12 * 3600)
+    return {"cards": [_tcg_card_row(c, qs.get("setName")) for c in res.get("data") or []],
+            "quota": _tcg_quota or None, **_tcg_page(res)}
+
+
+def tcg_search(qs):
+    game = require(qs, "game")
+    q = require(qs, "q")
+    if len(q) < 2:
+        raise ValueError("Type at least 2 characters to search.")
+    res = tcg_get("/search", {"q": q, "game": game, "type": "Cards", "page": qs.get("page", "1"), "per_page": 60},
+                  ttl=6 * 3600)
+    return {"query": q, "cards": [_tcg_card_row(c) for c in res.get("data") or []],
+            "quota": _tcg_quota or None, **_tcg_page(res)}
+
+
+def tcg_card(qs):
+    """Prices for every printing plus daily history; card details only when the page doesn't have them."""
+    card_id = require(qs, "id")
+    jobs = {
+        "prices": (f"/cards/{urllib.parse.quote(card_id)}/prices", None, 6 * 3600),
+        "history": (f"/cards/{urllib.parse.quote(card_id)}/history", {"range": "month"}, 6 * 3600),
+    }
+    if qs.get("info") == "1":
+        jobs["info"] = (f"/cards/{urllib.parse.quote(card_id)}", None, 7 * 86400)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {k: pool.submit(tcg_get, *args) for k, args in jobs.items()}
+        res = {k: f.result() for k, f in futures.items()}
+    prices = res["prices"].get("data") or []
+    if isinstance(prices, dict):
+        prices = [prices]
+    out = {
+        "prices": [{
+            "printing": p.get("printing"),
+            "market": p.get("market_price"),
+            "marketAsOf": p.get("market_price_as_of"),
+            "low": p.get("low_price"),
+            "median": p.get("median_price"),
+            "lowestShipped": p.get("lowest_with_shipping"),
+            "change24h": p.get("price_change_24h"),
+            "change7d": p.get("price_change_7d"),
+            "change30d": p.get("price_change_30d"),
+            "updated": p.get("last_updated_at"),
+        } for p in prices],
+        "history": [{
+            "date": h.get("date"),
+            "printing": h.get("printing"),
+            "market": h.get("market_price"),
+            "low": h.get("low_price"),
+            "avgSale": h.get("avg_sales_price"),
+            "volume": h.get("sales_volume"),
+        } for h in res["history"].get("data") or []],
+        "quota": _tcg_quota or None,
+    }
+    if "info" in res:
+        info = res["info"].get("data") or {}
+        out["card"] = {
+            **_tcg_card_row(info),
+            "set": info.get("set_name"),
+            "game": info.get("game_name"),
+            "url": info.get("tcgplayer_url"),
+        }
+    return out
+
+
 # ---------------------------------------------------------------- PSA
 
 def psa_get(path):
@@ -451,6 +710,8 @@ def status(_qs):
         "psaApproved": None if CACHE.get("psa:denied") is None else not CACHE.get("psa:denied"),
         "players": True,
         "insights": None if not ebay_configured() else not CACHE.get("ebay:insights:denied"),
+        "cardapi": cardapi_configured(),
+        "tcg": tcgapi_configured(),
     }
 
 
@@ -470,9 +731,15 @@ ROUTES = {
     "/api/status": status,
     "/api/ebay/search": cached("ebay:search:", 30 * 60, ebay_search),
     "/api/ebay/sold": cached("ebay:sold:", 60 * 60, ebay_sold),
+    "/api/cardapi/sold": cached("cardapi:sold:", 3 * 3600, cardapi_sold),
     "/api/psa/cert": cached("psa:cert:", 7 * 86400, psa_cert),
     "/api/psa/pop": cached("psa:pop:", 3 * 86400, psa_pop),
     "/api/player": cached("player:", 12 * 3600, player),
+    "/api/tcg/games": tcg_games,
+    "/api/tcg/sets": tcg_sets,
+    "/api/tcg/set-cards": tcg_set_cards,
+    "/api/tcg/search": tcg_search,
+    "/api/tcg/card": tcg_card,
 }
 
 
@@ -533,7 +800,9 @@ def main():
     url = f"http://127.0.0.1:{port}"
     print(f"\n  CardVault is running at {url}")
     print(f"  eBay: {'connected' if ebay_configured() else 'not configured'}   "
-          f"PSA: {'connected' if cfg('PSA_API_TOKEN') else 'not configured'}")
+          f"PSA: {'connected' if cfg('PSA_API_TOKEN') else 'not configured'}   "
+          f"Card API: {'connected' if cardapi_configured() else 'not configured'}   "
+          f"TCG API: {'connected' if tcgapi_configured() else 'not configured'}")
     print("  Close this window (or press Ctrl+C) to stop.\n")
     if "--no-browser" not in sys.argv:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()

@@ -6,144 +6,176 @@
   <title>CardVault</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <script>
+    // Apply the saved sidebar state before first paint so it doesn't flash open.
+    try {
+      const saved = localStorage.getItem('cv:sidebar');
+      if (saved === 'collapsed' || (saved === null && window.innerWidth <= 760)) {
+        document.documentElement.classList.add('side-collapsed');
+      }
+    } catch (e) {}
+  </script>
 </head>
 <body>
-  <div class="bg-glow" aria-hidden="true"></div>
-
-  <header class="topbar">
+  <aside class="sidebar" id="sidebar">
     <a class="brand" href="/" aria-label="CardVault home">
-      <span class="brand-mark">CV</span>
-      <span class="brand-name">Card<span>Vault</span></span>
+      <svg class="brand-mark" viewBox="0 0 28 28" aria-hidden="true">
+        <rect x="4" y="7" width="14" height="19" rx="2.5" class="back"/>
+        <rect x="10" y="2" width="14" height="19" rx="2.5" class="front"/>
+      </svg>
+      <span class="brand-name">CardVault</span>
     </a>
-    <div class="status" id="status" aria-label="Data source status"></div>
-    <button class="btn-ghost" id="openSetup" type="button">Setup</button>
-  </header>
 
-  <main>
-    <section class="hero" id="hero">
-      <p class="eyebrow">Topps sports card evaluator</p>
-      <h1>Know what your card is <em>really</em> worth.</h1>
-      <p class="lede">Search any Topps or Bowman card across baseball, basketball, football and soccer. Every rating is backed by live market data, grading populations and player records, and you can see the evidence behind each one.</p>
-    </section>
+    <nav class="side-nav" aria-label="Sections">
+      <a href="#/baseball" data-nav="baseball" title="Baseball">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M6.5 5.6c2.2 2.2 2.2 10.6 0 12.8M17.5 5.6c-2.2 2.2-2.2 10.6 0 12.8"/></svg>
+        <span>Baseball</span>
+      </a>
+      <a href="#/basketball" data-nav="basketball" title="Basketball">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3v18M5.8 5.8c3.4 3.2 3.4 9.2 0 12.4M18.2 5.8c-3.4 3.2-3.4 9.2 0 12.4"/></svg>
+        <span>Basketball</span>
+      </a>
+      <a href="#/football" data-nav="football" title="Football">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="10" ry="6" transform="rotate(-45 12 12)"/><path d="M9.5 14.5l5-5M10.6 11.6l1.8 1.8M12.1 10.1l1.8 1.8"/></svg>
+        <span>Football</span>
+      </a>
+      <a href="#/soccer" data-nav="soccer" title="Soccer">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8l3.8 2.8-1.5 4.4H9.7l-1.5-4.4zM12 8V3M15.8 10.8l4.6-1.5M14.3 15.2l2.8 3.9M9.7 15.2l-2.8 3.9M8.2 10.8L3.6 9.3"/></svg>
+        <span>Soccer</span>
+      </a>
+      <hr class="side-divider">
+      <a href="#/tcg" data-nav="tcg" title="TCG">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="11" height="15" rx="1.8" transform="rotate(-8 8.5 13.5)"/><rect x="10" y="3" width="11" height="15" rx="1.8"/><path d="M15.5 8l1.2 2.4 2.6.4-1.9 1.8.5 2.6-2.4-1.3-2.3 1.3.4-2.6-1.9-1.8 2.6-.4z"/></svg>
+        <span>TCG</span>
+      </a>
+    </nav>
 
-    <form class="panel search" id="searchForm" autocomplete="off">
-      <div class="sports" role="tablist" aria-label="Sport">
-        <button type="button" role="tab" data-sport="baseball" aria-selected="true">⚾ Baseball</button>
-        <button type="button" role="tab" data-sport="basketball" aria-selected="false">🏀 Basketball</button>
-        <button type="button" role="tab" data-sport="football" aria-selected="false">🏈 Football</button>
-        <button type="button" role="tab" data-sport="soccer" aria-selected="false">⚽ Soccer</button>
-      </div>
+    <button type="button" class="side-toggle" id="sideToggle" aria-controls="sidebar" aria-expanded="true" aria-label="Collapse sidebar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+    </button>
+  </aside>
 
-      <div class="grid">
-        <label class="field span-2">
-          <span>Player <b>*</b></span>
-          <input name="player" required placeholder="Mike Trout">
-        </label>
-        <label class="field">
-          <span>Year</span>
-          <input name="year" placeholder="2011" inputmode="numeric">
-        </label>
-        <label class="field span-2">
-          <span>Set</span>
-          <input name="set" list="setList" placeholder="Topps Update">
-          <datalist id="setList"></datalist>
-        </label>
-        <label class="field">
-          <span>Card #</span>
-          <input name="number" placeholder="US175">
-        </label>
-        <label class="field span-2">
-          <span>Parallel / variation <i>optional</i></span>
-          <input name="parallel" placeholder="e.g. Gold /50, Refractor, 1/1">
-        </label>
-        <label class="field">
-          <span>Condition</span>
-          <select name="company">
-            <option value="RAW">Raw (ungraded)</option>
-            <option value="PSA">PSA</option>
-            <option value="BGS">BGS (Beckett)</option>
-            <option value="SGC">SGC</option>
-            <option value="CGC">CGC</option>
-          </select>
-        </label>
-        <label class="field" id="gradeField" hidden>
-          <span>Grade</span>
-          <select name="grade"></select>
-        </label>
-      </div>
-
-      <div class="toggles">
-        <label class="chip-toggle"><input type="checkbox" name="rookie"><span>Rookie card (RC)</span></label>
-        <label class="chip-toggle"><input type="checkbox" name="auto"><span>Autograph</span></label>
-      </div>
-
-      <details class="more">
-        <summary>More evidence <span>PSA cert lookup · your own sold prices</span></summary>
-        <div class="more-body">
-          <label class="field">
-            <span>PSA cert number <i>for graded cards: pulls the official population report</i></span>
-            <input name="cert" placeholder="e.g. 12345678" inputmode="numeric">
-          </label>
-          <label class="field">
-            <span>Recent sold prices <i>one per line: price and optional date</i></span>
-            <textarea name="manual" rows="4" placeholder="245.00  2026-09-14&#10;$230  9/02/2026&#10;262.50"></textarea>
-            <small>Find these on eBay: search your card, then tick <b>Sold Items</b> in the filters. Only enter sales of the same card in the same condition.</small>
-          </label>
+  <div class="shell">
+    <main>
+      <section id="tcgView" hidden>
+        <div class="game-bar-wrap">
+          <button type="button" class="bar-arrow" data-dir="-1" aria-label="Scroll games left" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+          </button>
+          <nav class="game-bar" id="gameBar" aria-label="Card games"></nav>
+          <button type="button" class="bar-arrow" data-dir="1" aria-label="Scroll games right" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
         </div>
-      </details>
 
-      <div class="actions">
-        <button class="btn-primary" type="submit" id="submitBtn">
-          <span>Evaluate card</span>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-        </button>
-        <p class="hint" id="formHint"></p>
-      </div>
-    </form>
+        <header class="page-head tcg-head">
+          <div>
+            <h1 id="tcgTitle">TCG</h1>
+            <p class="lede" id="tcgLede"></p>
+          </div>
+          <form class="tcg-search" id="tcgSearch" role="search" autocomplete="off" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            <input type="search" name="q" minlength="2" required aria-label="Search cards">
+            <button type="submit">Search</button>
+          </form>
+        </header>
 
-    <section class="loading panel" id="loading" hidden aria-live="polite">
-      <div class="loader-card" aria-hidden="true"></div>
-      <ol id="loadingSteps"></ol>
-    </section>
+        <div class="alerts" id="tcgAlerts" aria-live="polite"></div>
+        <div id="tcgBody"></div>
+        <p class="quota" id="tcgQuota"></p>
+      </section>
 
-    <div class="alerts" id="alerts" aria-live="polite"></div>
+      <section id="sportsView">
+        <header class="page-head" id="hero">
+          <h1 id="pageTitle">Baseball</h1>
+          <p class="lede" id="pageLede">Look up any Topps or Bowman card. Every rating is backed by live listings, recent sales and player records, and you can see the evidence behind each one.</p>
+        </header>
 
-    <section id="results" hidden></section>
-  </main>
+        <form class="panel search" id="searchForm" autocomplete="off">
+          <div class="grid">
+            <label class="field span-2">
+              <span>Player <b>*</b></span>
+              <input name="player" required placeholder="Mike Trout">
+            </label>
+            <label class="field">
+              <span>Year</span>
+              <input name="year" placeholder="2011" inputmode="numeric">
+            </label>
+            <label class="field span-2">
+              <span>Set</span>
+              <input name="set" list="setList" placeholder="Topps Update">
+              <datalist id="setList"></datalist>
+            </label>
+            <label class="field">
+              <span>Card #</span>
+              <input name="number" placeholder="US175">
+            </label>
+            <label class="field span-2">
+              <span>Parallel / variation <i>optional</i></span>
+              <input name="parallel" placeholder="e.g. Gold /50, Refractor, 1/1">
+            </label>
+            <label class="field">
+              <span>Condition</span>
+              <select name="company">
+                <option value="RAW">Raw (ungraded)</option>
+                <option value="PSA">PSA</option>
+                <option value="BGS">BGS (Beckett)</option>
+                <option value="SGC">SGC</option>
+                <option value="CGC">CGC</option>
+              </select>
+            </label>
+            <label class="field" id="gradeField" hidden>
+              <span>Grade</span>
+              <select name="grade"></select>
+            </label>
+          </div>
 
-  <footer class="foot">
-    <p>CardVault gives data-driven estimates, not professional appraisals. Not affiliated with or endorsed by Topps, eBay, PSA or any league.</p>
-  </footer>
+          <div class="toggles">
+            <label class="chip-toggle"><input type="checkbox" name="rookie"><span>Rookie card (RC)</span></label>
+            <label class="chip-toggle"><input type="checkbox" name="auto"><span>Autograph</span></label>
+          </div>
 
-  <dialog id="setup" class="setup">
-    <form method="dialog" class="setup-inner">
-      <header>
-        <h2>Connect your data sources</h2>
-        <button class="close" value="close" aria-label="Close">✕</button>
-      </header>
-      <div id="setupStatus" class="setup-status"></div>
-      <ol class="setup-steps">
-        <li>
-          <h3>eBay: live prices, demand, liquidity</h3>
-          <p>Sign in at <b>developer.ebay.com</b> → <b>Application Keysets</b> → create a <b>Production</b> keyset. When asked about Marketplace Account Deletion, choose the exemption (this app doesn't store eBay user data). Copy the <b>App ID</b> and <b>Cert ID</b>.</p>
-          <p class="muted">Optional: ask eBay for <b>Marketplace Insights</b> access to unlock real sold prices.</p>
-        </li>
-        <li>
-          <h3>PSA: grading population</h3>
-          <p>Your token goes in <code>PSA_API_TOKEN</code>. PSA must also approve your account for API access. If PSA shows as "awaiting approval", email <b>collectors-apis@collectors.com</b> and ask them to enable Public API access for your account.</p>
-        </li>
-        <li>
-          <h3>Add the keys</h3>
-          <p>Open <code>cardvault\.env</code> in VS Code, paste each key after its <code>=</code>, save, then close and re-open <code>start.bat</code>.</p>
-        </li>
-      </ol>
-      <p class="muted">Player data (Wikipedia, Wikidata, MLB Stats API) is free and needs no setup.</p>
-    </form>
-  </dialog>
+          <details class="more">
+            <summary>More evidence <span>add sold prices you've found</span></summary>
+            <div class="more-body">
+              <label class="field">
+                <span>Recent sold prices <i>one per line: price and optional date</i></span>
+                <textarea name="manual" rows="4" placeholder="245.00  2026-09-14&#10;$230  9/02/2026&#10;262.50"></textarea>
+                <small>Find these on eBay: search your card, then tick <b>Sold Items</b> in the filters. Only enter sales of the same card in the same condition.</small>
+              </label>
+            </div>
+          </details>
+
+          <div class="actions">
+            <button class="btn-primary" type="submit" id="submitBtn">
+              <span>Evaluate card</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </button>
+            <p class="hint" id="formHint"></p>
+          </div>
+        </form>
+
+        <section class="loading panel" id="loading" hidden aria-live="polite">
+          <div class="loader-card" aria-hidden="true"></div>
+          <ol id="loadingSteps"></ol>
+        </section>
+
+        <div class="alerts" id="alerts" aria-live="polite"></div>
+
+        <section id="results" hidden></section>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <p>CardVault gives data-driven estimates, not professional appraisals. Not affiliated with or endorsed by Topps, eBay, PSA or any league.</p>
+    </footer>
+  </div>
 
   <script src="scoring.js"></script>
+  <script src="tcg-scoring.js"></script>
+  <script src="tcg.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

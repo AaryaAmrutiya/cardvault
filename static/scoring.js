@@ -50,6 +50,14 @@
   const AUTO = /\b(auto|autos|autograph|autographed|signed|signature)\b/;
   const MEM = /\b(patch|relic|jersey|swatch|memorabilia|bat card|game[- ]used)\b/;
   const GRADED_WORD = /\b(graded|slab|slabbed)\b/;
+  const OTHER_BRANDS = /\b(panini|donruss|upper deck|leaf|fleer|hoops|mosaic|optic|skybox|o-pee-chee)\b/;
+  const SET_STOP = new Set(['topps', 'series', 'the', 'of', 'and', 'set', 'base', 'card', 'cards']);
+
+  // Words that identify the set in a title. "Topps", series numbers and filler are left
+  // out because sellers often omit them.
+  function setWords(set) {
+    return normalize(set).split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !SET_STOP.has(w) && !/^\d+$/.test(w));
+  }
   const GRADE_RE = /\b(psa|bgs|beckett|sgc|cgc|csg|tag|hga)\b[\s\-:#]*(?:(?:gem|mint|mt|nm-mt|nm|pristine|graded|black label)\s*)*(10|[1-9](?:\.5)?)(?:\.0)?(?![\d\/])/;
 
   function cleanTitle(t) {
@@ -96,6 +104,8 @@
     const weakNum = num ? new RegExp(`(?:^|[\\s(])(?:no\\.?\\s?)?${numEsc}(?=[\\s),.]|$)`) : null;
     const allowWeak = num.length >= 3 || /[a-z]/.test(num);
     const wantsMem = MEM.test(normalize(input.parallel));
+    const sWords = setWords(input.set);
+    const ownBrand = OTHER_BRANDS.test(normalize(input.set));
     const sRe = par.serial ? serialRe(par.serial) : null;
 
     return function classify(title) {
@@ -113,6 +123,9 @@
         autoOk: input.auto ? isAuto : !isAuto,
         memOk: wantsMem || !MEM.test(t),
         parallelOk,
+        brandOk: ownBrand || !OTHER_BRANDS.test(t),
+        // Plural-insensitive, so "Prospects" matches a title that says "Prospect".
+        setOk: sWords.every((w) => t.includes(w.replace(/s$/, ''))),
         grade,
         graded: !!grade || GRADED_WORD.test(t),
         rookie: /\b(rc|rookie)\b/.test(t),
@@ -121,7 +134,7 @@
     };
   }
 
-  const MANUAL_CLS = { junk: false, nameOk: true, yearOk: true, numberOk: true, autoOk: true, memOk: true, parallelOk: true, grade: null, graded: false, rookie: false, firstBowman: false, manual: true };
+  const MANUAL_CLS = { junk: false, nameOk: true, yearOk: true, numberOk: true, autoOk: true, memOk: true, parallelOk: true, brandOk: true, setOk: true, grade: null, graded: false, rookie: false, firstBowman: false, manual: true };
 
   function tagItems(items, kind, classify) {
     return (items || []).map((it, i) => ({
@@ -133,10 +146,13 @@
   }
 
   function buildPool(items, input, excluded) {
-    const base = items.filter((x) => {
+    let base = items.filter((x) => {
       const c = x.cls;
-      return !c.junk && c.nameOk && c.yearOk && c.autoOk && c.memOk && c.parallelOk;
+      return !c.junk && c.nameOk && c.yearOk && c.autoOk && c.memOk && c.parallelOk && c.brandOk;
     });
+    // Titles name sets inconsistently, so only insist on the set when enough titles mention it.
+    const inSet = base.filter((x) => x.cls.setOk);
+    if (inSet.filter((x) => !x.cls.manual).length >= 3) base = inSet;
     let all = base, numberMatched = null;
     if (input.number) {
       const num = base.filter((x) => x.cls.numberOk);
@@ -213,6 +229,11 @@
   const viewScore = (avg) => clamp(25 * Math.log10(avg + 1) - 10);
   const avgViews = (wiki) => (wiki && wiki.views && wiki.views.length ? wiki.views.reduce((a, b) => a + b, 0) / wiki.views.length : null);
 
+  function salesCountText(c, noun) {
+    const n = `${c.salesTruncated ? 'At least ' : ''}${int(c.soldCount)} ${noun} in the last ${c.salesWindow} days`;
+    return c.salesWindow < 90 ? `${n} (a pace of about ${int(c.soldQty90)} per 90 days).` : `${n}.`;
+  }
+
   function result(key, name, parts, evidence, method, summary, labelOverride) {
     const score = weighted(parts);
     return {
@@ -281,7 +302,7 @@
     const parts = [], e = [];
     if (c.soldQty90 != null && c.soldQty90 > 0) {
       parts.push({ score: clamp(30 * Math.log10(c.soldQty90 + 1)), weight: 0.5 });
-      e.push(ev(`${int(c.soldQty90)} copies sold in the last 90 days.`, SRC.sold));
+      e.push(ev(salesCountText(c, 'copies sold'), c.soldSrc));
     }
     const auctions = c.L.active.filter((x) => (x.buying || []).includes('AUCTION'));
     if (auctions.length >= 3) {
@@ -374,8 +395,8 @@
         const mRaw = median(raw), m10 = median(psa10);
         const premium = m10 / mRaw;
         parts.push({ score: clamp(25 * Math.log2(Math.max(premium, 1))), weight: 0.55 });
-        e.push(ev(`Raw copies: median ${money(mRaw)} (${raw.length}). PSA 10: median ${money(m10)} (${psa10.length}). A PSA 10 is worth ${premium.toFixed(1)}× raw.`, c.market.salesAvailable ? SRC.sold : SRC.ebay));
-        if (psa9.length >= 2) e.push(ev(`PSA 9 copies: median ${money(median(psa9))} (${psa9.length}).`, c.market.salesAvailable ? SRC.sold : SRC.ebay));
+        e.push(ev(`Raw copies: median ${money(mRaw)} (${raw.length}). PSA 10: median ${money(m10)} (${psa10.length}). A PSA 10 is worth ${premium.toFixed(1)}× raw.`, c.market.salesAvailable ? `${c.soldSrc} + ${SRC.ebay}` : SRC.ebay));
+        if (psa9.length >= 2) e.push(ev(`PSA 9 copies: median ${money(median(psa9))} (${psa9.length}).`, c.market.salesAvailable ? `${c.soldSrc} + ${SRC.ebay}` : SRC.ebay));
         if (mRaw < 25) e.push(ev('Raw value is low. Grading fees can exceed the gain unless the card reaches a 10.', SRC.model));
       }
       let gemRate = null;
@@ -431,7 +452,7 @@
     const parts = [], e = [];
     if (c.soldQty90 != null && c.soldQty90 > 0) {
       parts.push({ score: clamp(35 * Math.log10(c.soldQty90 + 1)), weight: 0.5 });
-      e.push(ev(`${int(c.soldQty90)} sales in the last 90 days.`, SRC.sold));
+      e.push(ev(salesCountText(c, 'sales'), c.soldSrc));
     }
     if (c.market.ebay && c.market.total != null) {
       parts.push({ score: clamp(22 * Math.log10(c.market.total + 1)), weight: 0.3 });
@@ -447,7 +468,7 @@
       const p = sortNum(comps.map((x) => x.price));
       const spread = (quantile(p, 0.75) - quantile(p, 0.25)) / quantile(p, 0.5);
       parts.push({ score: clamp(100 - spread * 100), weight: 0.2 });
-      const src = comps.every((x) => x.manual) ? SRC.manual : c.valuation.method === 'sold' ? SRC.sold : SRC.ebay;
+      const src = comps.every((x) => x.manual) ? SRC.manual : c.valuation.method === 'sold' ? c.soldSrc : SRC.ebay;
       e.push(ev(`Middle 50% of comparable prices spans ${money(quantile(p, 0.25))}–${money(quantile(p, 0.75))}. ${spread < 0.35 ? 'A tight range means clear price discovery.' : 'A wide range means buyers and sellers disagree on price.'}`, src));
     }
     const s = weighted(parts);
@@ -465,7 +486,7 @@
     if (recent.length >= 3 && prior.length >= 3) {
       const change = median(recent) / median(prior) - 1;
       parts.push({ score: clamp(50 + change * 100), weight: 0.6 });
-      e.push(ev(`Median sale price last 30 days: ${money(median(recent))} vs ${money(median(prior))} in the 30–90 days before (${change >= 0 ? '+' : ''}${pct(change)}).`, c.manualOnly ? SRC.manual : SRC.sold));
+      e.push(ev(`Median sale price last 30 days: ${money(median(recent))} vs ${money(median(prior))} in the 30–90 days before (${change >= 0 ? '+' : ''}${pct(change)}).`, c.manualOnly ? SRC.manual : c.soldSrc));
     }
     const asks = c.valuation.askComps.filter((x) => x.created);
     const newAsks = asks.filter((x) => now - Date.parse(x.created) <= 14 * DAY).map((x) => x.price);
@@ -502,7 +523,7 @@
       const p = sortNum(c.soldComps.map((x) => x.price));
       Object.assign(out, { method: 'sold', point: quantile(p, 0.5), low: quantile(p, 0.25), high: quantile(p, 0.75), n: p.length, comps: c.soldComps });
       out.confidence = p.length >= 10 ? 'High' : p.length >= 5 ? 'Medium' : 'Low';
-      out.notes.push(`Median of ${p.length} recent sales; range is the middle 50% of those sales.`);
+      out.notes.push(`Median of ${p.length} recent sales${c.salesWindow < 90 ? ` from the last ${c.salesWindow} days` : ''}; range is the middle 50% of those sales.`);
     } else if (c.askComps.length >= 3) {
       const p = sortNum(c.askComps.map((x) => x.price));
       Object.assign(out, { method: 'asking', point: quantile(p, 0.35), low: quantile(p, 0.2), high: quantile(p, 0.5), n: p.length, comps: c.askComps });
@@ -591,9 +612,14 @@
       rookieShare: share((x) => x.cls.rookie),
       firstBowmanShare: share((x) => x.cls.firstBowman),
       // Hand-entered prices are a sample, not a full sales count, so they never feed volume-based ratings.
-      soldQty90: market.salesAvailable ? sold90.filter((x) => !x.manual).reduce((s, x) => s + (x.qty || 1), 0) : null,
+      soldCount: market.salesAvailable ? sold90.filter((x) => !x.manual).reduce((s, x) => s + (x.qty || 1), 0) : null,
+      salesWindow: Math.min(market.salesWindowDays || 90, 90),
+      salesTruncated: !!market.salesTruncated,
+      soldSrc: market.salesSource || SRC.sold,
       manualOnly: !market.salesAvailable,
     };
+    // Volume ratings are calibrated on 90 days of sales; a shorter window is scaled to that pace.
+    c.soldQty90 = c.soldCount == null ? null : c.soldCount * (90 / c.salesWindow);
     c.valuation = valuate(c);
 
     const scores = [scoreRarity(c), scoreCollector(c), scoreDemand(c), scorePlayer(c), scoreGrading(c), scoreLiquidity(c), scoreMomentum(c)];

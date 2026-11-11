@@ -16,6 +16,8 @@ http://127.0.0.1:8765. Close the black window to stop the app.
 |---|---|---|
 | eBay Browse API | live listings → value, demand, liquidity, rarity, momentum | `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` in `.env` |
 | eBay Marketplace Insights | real sold prices (much better estimates) | needs approval from eBay; used automatically if granted |
+| The Card API | real sold prices (eBay, Goldin and other auction houses) → value, demand, liquidity | `CARD_API_KEY` in `.env` (free plan: about the last week of sales, 5,000 rows/day) |
+| TCG API (tcgapi.dev) | TCG page: TCGplayer prices per printing, daily price history and sales volume for 57 trading card games | `TCGAPI_KEY` in `.env` (free plan: 100 lookups/day, last 7 days of history) |
 | PSA Public API | population report, gem rate, grade standing | `PSA_API_TOKEN` in `.env` + account approval from PSA |
 | Wikipedia + pageviews | player profile, fame, attention trend | none |
 | Wikidata | player awards (all sports) | none |

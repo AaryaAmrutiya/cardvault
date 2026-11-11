@@ -35,46 +35,40 @@
 
   // ------------------------------------------------------------ status
 
+  // Which data sources the server has; decides what each search queries.
   async function loadStatus() {
     try {
       state.status = await api('/api/status');
     } catch {
-      state.status = { ebay: false, psa: false, players: false, offline: true };
+      state.status = { ebay: false, cardapi: false, players: false, offline: true };
     }
-    renderStatus();
-  }
-
-  function pills() {
-    const s = state.status || {};
-    const psaState = !s.psa ? 'off' : s.psaApproved === false ? 'warn' : 'on';
-    const ebayState = !s.ebay ? 'off' : s.insights === false ? 'warn' : 'on';
-    return [
-      [ebayState, 'eBay', !s.ebay ? 'eBay: not connected' : s.insights === false ? 'eBay: live listings (no sold data)' : 'eBay: connected'],
-      [psaState, 'PSA', !s.psa ? 'PSA: no token' : s.psaApproved === false ? 'PSA: awaiting API approval' : 'PSA: connected'],
-      [s.players ? 'on' : 'off', 'Player data', s.players ? 'Player data: connected' : 'Server offline'],
-    ];
-  }
-
-  function renderStatus() {
-    const html = pills().map(([cls, short, long]) => `<span class="pill ${cls}" title="${esc(long)}"><i></i>${esc(short)}</span>`).join('');
-    $('#status').innerHTML = html;
-    $('#setupStatus').innerHTML = pills().map(([cls, , long]) => `<span class="pill ${cls}"><i></i>${esc(long)}</span>`).join('');
-    const s = state.status || {};
-    $('#formHint').textContent = s.offline ? 'Server not running. Start it with start.bat.'
-      : !s.ebay ? 'eBay not connected yet: add sold prices under "More evidence" to get a value estimate.' : '';
+    $('#formHint').textContent = state.status.offline ? 'CardVault is temporarily unavailable. Please try again shortly.' : '';
   }
 
   // ------------------------------------------------------------ form
 
   function setSport(sport) {
     state.sport = sport;
-    $$('.sports button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.sport === sport)));
+    $('#pageTitle').textContent = $(`.side-nav [data-nav="${sport}"]`).textContent.trim();
     $('#setList').innerHTML = SETS[sport].map((s) => `<option value="${esc(s)}">`).join('');
     const ex = EXAMPLES[sport];
     form.player.placeholder = ex.player;
     form.year.placeholder = ex.year;
     form.set.placeholder = ex.set;
     form.number.placeholder = ex.number || 'e.g. 12';
+  }
+
+  // ------------------------------------------------------------ sidebar
+
+  const isNarrow = () => window.matchMedia('(max-width: 760px)').matches;
+
+  function setSidebar(collapsed, remember = true) {
+    document.documentElement.classList.toggle('side-collapsed', collapsed);
+    const toggle = $('#sideToggle');
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    toggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+    if (!remember) return;
+    try { localStorage.setItem('cv:sidebar', collapsed ? 'collapsed' : 'open'); } catch (e) {}
   }
 
   function updateGrades() {
@@ -98,7 +92,6 @@
       rookie: form.rookie.checked,
       auto: form.auto.checked,
       condition: { company, grade: company === 'RAW' ? null : parseFloat(form.grade.value) },
-      cert: form.cert.value.replace(/\D/g, ''),
       manual: form.manual.value,
     };
   }
@@ -114,25 +107,17 @@
     return [...new Set(qs)];
   }
 
-  const titleCase = (s) => String(s || '').toLowerCase().replace(/\b([a-z])/g, (m) => m.toUpperCase());
-
-  function applyCert(cert, input) {
-    const c = cert && (cert.PSACert || cert);
-    if (!c) return;
-    const fill = (field, value) => { if (!input[field] && value) { input[field] = String(value).trim(); form[field].value = input[field]; } };
-    fill('player', titleCase(c.Subject));
-    fill('year', c.Year);
-    fill('set', titleCase(c.Brand));
-    fill('number', c.CardNumber);
-    fill('parallel', c.Variety ? titleCase(c.Variety) : '');
-    const g = String(c.CardGrade || '').match(/(\d+(?:\.\d)?)\s*$/);
-    if (g) {
-      input.condition = { company: 'PSA', grade: parseFloat(g[1]) };
-      form.company.value = 'PSA';
-      updateGrades();
-      form.grade.value = String(parseFloat(g[1]));
-    }
+  // The Card API matches every word, so long queries miss. Search narrowly (last name plus
+  // card number, or year) and let the scoring classifier do the exact matching.
+  function cardApiQuery(input) {
+    const words = input.player.split(/\s+/).filter((w) => w && !/^(jr|sr|ii|iii|iv)\.?$/i.test(w));
+    const last = words[words.length - 1] || input.player;
+    const num = input.number;
+    const year = (String(input.year).match(/\d{4}/) || [])[0];
+    const distinctive = num && (num.length >= 3 || /[a-z]/i.test(num));
+    return [last, distinctive ? num : year].filter(Boolean).join(' ');
   }
+
 
   // ------------------------------------------------------------ loading steps
 
@@ -156,7 +141,7 @@
   async function evaluateCard(e) {
     e.preventDefault();
     const input = readInput();
-    if (!input.player && !input.cert) { form.player.focus(); return; }
+    if (!input.player) { form.player.focus(); return; }
     const s = state.status || {};
     const btn = $('#submitBtn');
     btn.disabled = true;
@@ -164,38 +149,22 @@
     $('#results').hidden = true;
 
     const steps = [];
-    if (input.cert) steps.push({ key: 'psa', label: 'Looking up PSA cert & population…' });
-    steps.push({ key: 'ebay', label: s.ebay ? 'Searching live eBay listings…' : 'eBay not connected: skipping live listings' });
-    steps.push({ key: 'sold', label: s.ebay ? 'Checking recent sold prices…' : 'Reading the sold prices you entered…' });
+    steps.push({ key: 'ebay', label: s.ebay ? 'Searching live eBay listings…' : 'Live listings unavailable' });
+    steps.push({ key: 'sold', label: s.ebay || s.cardapi ? 'Checking recent sold prices…' : 'Reading the sold prices you entered…' });
     steps.push({ key: 'player', label: 'Pulling player records, awards & attention…' });
     steps.push({ key: 'score', label: 'Scoring and estimating value…' });
     startSteps(steps);
 
     try {
-      let psa = null;
-      if (input.cert) {
-        try {
-          const cert = await api('/api/psa/cert', { cert: input.cert });
-          applyCert(cert, input);
-          const spec = (cert.PSACert || cert).SpecID;
-          let pop = null;
-          if (spec) pop = await api('/api/psa/pop', { spec }).catch(() => null);
-          psa = { cert, pop };
-          step('psa', 'done', `PSA cert found${pop ? ' with population report' : ''}`);
-        } catch (err) {
-          step('psa', 'fail', 'PSA lookup failed');
-          alertBox(`<b>PSA:</b> ${esc(err.message)}`, 'error');
-          loadStatus();
-        }
-      }
-      if (!input.player) throw new Error('Enter a player name (the PSA cert could not fill it in).');
-
       const queries = buildQueries(input);
       const listingsP = s.ebay
         ? Promise.allSettled(queries.map((q) => api('/api/ebay/search', { q })))
         : Promise.resolve(null);
       const soldP = s.ebay
         ? Promise.allSettled(queries.map((q) => api('/api/ebay/sold', { q })))
+        : Promise.resolve(null);
+      const cardApiP = s.cardapi
+        ? api('/api/cardapi/sold', { q: cardApiQuery(input) }).catch((err) => ({ available: false, error: err.message }))
         : Promise.resolve(null);
       const playerP = api('/api/player', { name: input.player, sport: input.sport }).catch((err) => ({ errors: [err.message] }));
 
@@ -216,45 +185,60 @@
         } else {
           step('ebay', 'fail', 'eBay search failed');
         }
-        if (failed && !ok.length) alertBox(`<b>eBay:</b> ${esc(failed.reason.message)}`, 'error');
+        if (failed && !ok.length) console.warn('eBay search failed:', failed.reason.message);
       } else {
         step('ebay', 'skip');
       }
 
       const soldRes = await soldP;
+      const cardApiRes = await cardApiP;
+      const seenSales = new Set();
+      const addSale = (it) => {
+        const itemId = (String(it.url || '').match(/\/itm\/(?:[^/?]*\/)?(\d{9,})/) || [])[1];
+        const key = `${itemId || it.url}|${it.date && it.date.slice(0, 10)}|${it.price}`;
+        if (!seenSales.has(key)) { seenSales.add(key); market.sales.push(it); }
+      };
+      const sources = [];
       if (soldRes) {
         const ok = soldRes.filter((r) => r.status === 'fulfilled').map((r) => r.value);
         const avail = ok.filter((r) => r.available);
         if (avail.length) {
-          market.salesAvailable = true;
-          const seen = new Set();
-          for (const r of avail) for (const it of r.items) {
-            const key = `${it.url}|${it.date}|${it.price}`;
-            if (!seen.has(key)) { seen.add(key); market.sales.push(it); }
-          }
-        } else if (ok[0] && ok[0].reason) {
-          market.salesNote = ok[0].reason;
+          sources.push('eBay');
+          for (const r of avail) r.items.forEach(addSale);
         }
       }
+      if (cardApiRes && cardApiRes.available) {
+        sources.push('The Card API');
+        cardApiRes.items.forEach(addSale);
+        market.cardApi = { query: cardApiRes.query, total: cardApiRes.total, truncated: cardApiRes.truncated, from: cardApiRes.windowFrom };
+        // eBay Insights covers 90 days; when it is missing, the sales window is the Card API's.
+        if (!sources.includes('eBay')) market.salesWindowDays = cardApiRes.windowDays;
+        market.salesTruncated = cardApiRes.truncated;
+      } else if (cardApiRes && cardApiRes.error) {
+        console.warn('Sold-price lookup failed:', cardApiRes.error);
+      }
+      market.salesAvailable = sources.length > 0;
+      market.salesSource = sources.length ? `${sources.join(' + ')} sold data` : null;
       const manual = Scoring.parseManualSales(input.manual);
       market.sales.push(...manual);
       step('sold', market.sales.length ? 'done' : 'skip',
-        market.salesAvailable ? `Found ${market.sales.length - manual.length} eBay sales${manual.length ? ` + ${manual.length} of yours` : ''}`
+        market.salesAvailable ? `Found ${market.sales.length - manual.length} sales via ${sources.join(' + ')}${manual.length ? ` + ${manual.length} of yours` : ''}`
           : manual.length ? `Using ${manual.length} sold price${manual.length > 1 ? 's' : ''} you entered` : 'No sold-price data available');
 
       const player = await playerP;
       const found = player && (player.wiki || player.mlb);
       step('player', found ? 'done' : 'fail', found ? `Player data for ${player.wiki ? player.wiki.title : player.mlb.name}` : 'Player not found');
 
-      state.ctx = { input, market, player, psa };
+      state.ctx = { input, market, player, psa: null };
       state.excluded = new Set();
       state.showAll = false;
       step('score', 'done', 'Done');
 
-      if (!market.ebay && !manual.length) {
-        alertBox('<b>No price data yet.</b> eBay isn\'t connected, so add a few recent sold prices under <b>More evidence</b> to get a value estimate. Player and card ratings are shown below.');
+      if (!market.ebay && !market.salesAvailable && !manual.length) {
+        alertBox('<b>No market data found for this card.</b> Add a few recent sold prices under <b>More evidence</b> to get a value estimate. Player and card ratings are shown below.');
+      } else if (market.ebay && !market.sales.length) {
+        alertBox('No recent sales were found for this card, so the estimate is based on current asking prices.');
       }
-      if (market.salesNote && market.ebay && !manual.length) alertBox(esc(market.salesNote));
 
       render();
       setTimeout(() => { $('#loading').hidden = true; }, 350);
@@ -391,9 +375,9 @@
       const pts = views.map((n, i) => `${(i / (views.length - 1)) * 300},${66 - (n / max) * 60}`).join(' ');
       spark = `<div class="spark">
         <svg viewBox="0 0 300 70" preserveAspectRatio="none" aria-label="Wikipedia daily views, last 60 days">
-          <defs><linearGradient id="sg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#46d3c0" stop-opacity=".35"/><stop offset="1" stop-color="#46d3c0" stop-opacity="0"/></linearGradient></defs>
+          <defs><linearGradient id="sg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#2552c9" stop-opacity=".35"/><stop offset="1" stop-color="#2552c9" stop-opacity="0"/></linearGradient></defs>
           <polygon points="0,70 ${pts} 300,70" fill="url(#sg)"/>
-          <polyline points="${pts}" fill="none" stroke="#46d3c0" stroke-width="2" vector-effect="non-scaling-stroke"/>
+          <polyline points="${pts}" fill="none" stroke="#2552c9" stroke-width="2" vector-effect="non-scaling-stroke"/>
         </svg>
         <div class="spark-meta"><span>${esc(w.viewsStart)}</span><span>Wikipedia views/day · peak ${max.toLocaleString()}</span><span>${esc(w.viewsEnd)}</span></div>
       </div>`;
@@ -476,9 +460,9 @@
   function sourcesBlock(r, market, player) {
     const items = [];
     if (market.ebay) items.push(`eBay Browse API: live listings for "${esc(market.queries.join('", "'))}" (${r.matched.rawListings} retrieved, ${r.matched.listings} matched this card after filtering out lots, reprints, other parallels and other players).`);
-    if (market.salesAvailable) items.push('eBay Marketplace Insights: sold listings from the last 90 days.');
+    if (market.salesSource && market.salesSource.includes('eBay')) items.push('eBay Marketplace Insights: sold listings from the last 90 days.');
+    if (market.cardApi) items.push(`The Card API: completed sales since ${esc(market.cardApi.from || 'its lookback window')} for "${esc(market.cardApi.query)}" (${market.cardApi.total} found${market.cardApi.truncated ? ', newest 200 used' : ''}), before filtering to this card.`);
     if (r.valuation.comps.some((x) => x.manual)) items.push('Sold prices you entered manually.');
-    if (state.ctx.psa) items.push('PSA Public API: cert and population report.');
     if (player && player.wiki) items.push(`Wikipedia: <a href="${esc(player.wiki.url)}" target="_blank" rel="noopener">${esc(player.wiki.title)}</a>, with daily pageviews from the Wikimedia REST API.`);
     if (player && player.awards) items.push('Wikidata: awards received (property P166).');
     if (player && player.mlb) items.push('MLB Stats API: career stats and awards.');
@@ -510,13 +494,42 @@
     }
   }
 
+  // ------------------------------------------------------------ routing
+
+  // #/baseball … #/soccer show the sports evaluator; #/tcg/… is handed to the TCG view.
+  function route() {
+    const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
+    const top = parts[0] === 'tcg' ? 'tcg' : SETS[parts[0]] ? parts[0] : 'baseball';
+    $('#sportsView').hidden = top === 'tcg';
+    $('#tcgView').hidden = top !== 'tcg';
+    $$('.side-nav a').forEach((a) => {
+      if (a.dataset.nav === top) a.setAttribute('aria-current', 'true');
+      else a.removeAttribute('aria-current');
+    });
+    if (top === 'tcg') {
+      document.title = 'TCG · CardVault';
+      TcgView.show(parts.slice(1));
+    } else {
+      document.title = 'CardVault';
+      setSport(top);
+    }
+  }
+
   // ------------------------------------------------------------ init
 
-  $$('.sports button').forEach((b) => b.addEventListener('click', () => setSport(b.dataset.sport)));
+  $$('.side-nav a').forEach((a) => a.addEventListener('click', () => {
+    // On phones the open sidebar covers the page, so close it once a section is picked.
+    if (isNarrow()) setSidebar(true, false);
+  }));
+  $('#sideToggle').addEventListener('click', () => {
+    setSidebar(!document.documentElement.classList.contains('side-collapsed'), !isNarrow());
+  });
+  setSidebar(document.documentElement.classList.contains('side-collapsed'), false);
   form.company.addEventListener('change', updateGrades);
   form.addEventListener('submit', evaluateCard);
-  $('#openSetup').addEventListener('click', () => { loadStatus(); $('#setup').showModal(); });
-  setSport('baseball');
   updateGrades();
   loadStatus();
+  TcgView.init({ api, esc, ring, scoreCard, confBars });
+  window.addEventListener('hashchange', route);
+  route();
 })();

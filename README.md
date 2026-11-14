@@ -1,48 +1,37 @@
-# CardVault Outline
+# CardVault
 
-Cardvault is an outline of the final project which values your specific card using PSA and eBay's API to fetch data accurately.
+Find out what your card is really worth.
 
-Evaluate any Topps / Bowman sports card (baseball, basketball, football, soccer) with
-evidence-backed ratings and a value estimate.
+CardVault rates any Topps or Bowman sports card (baseball, basketball, football or soccer) and gives you a value estimate backed by real sales data. It also has a trading card game section with prices for 57 trading card games.
 
-## Run it
+**Try it here: https://cardvault-3v3v.onrender.com/**
 
-Double-click `start.bat` (or run `python server.py`). Your browser opens at
-[http://127.0.0.1:8765](https://cardvault-3v3v.onrender.com/). Close the black window to stop the app.
+## How to use it
 
-## Data sources
+1. Open the app and enter your card: player, year, set and any details like the card number, parallel, serial number or grade.
+2. CardVault looks up recent sales, current listings and grading data for that card.
+3. You get a value estimate plus seven ratings that explain why the card is worth what it is.
 
-| Source | Used for | Setup |
-|---|---|---|
-| eBay Browse API | live listings → value, demand, liquidity, rarity, momentum | `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` in `.env` |
-| eBay Marketplace Insights | real sold prices (much better estimates) | needs approval from eBay; used automatically if granted |
-| The Card API | real sold prices (eBay, Goldin and other auction houses) → value, demand, liquidity | `CARD_API_KEY` in `.env` (free plan: about the last week of sales, 5,000 rows/day) |
-| TCG API (tcgapi.dev) | TCG page: TCGplayer prices per printing, daily price history and sales volume for 57 trading card games | `TCGAPI_KEY` in `.env` (free plan: 100 lookups/day, last 7 days of history) |
-| PSA Public API | population report, gem rate, grade standing | `PSA_API_TOKEN` in `.env` + account approval from PSA |
-| Wikipedia + pageviews | player profile, fame, attention trend | none |
-| Wikidata | player awards (all sports) | none |
-| MLB Stats API | MLB awards and career stats | none |
-| Sold prices you enter | value + momentum when eBay isn't connected | none |
-
-Edit `.env`, then restart the app.
+For trading card games, open the **TCG** page from the sidebar and search for your card to see its prices, price history and sales volume.
 
 ## The ratings
 
-Every rating is 0–100 and its card in the app lists the evidence and the formula.
-Missing data is skipped and the remaining inputs re-weighted. Ratings show
-"Not enough data" instead of guessing.
+Each rating is scored from 0 to 100. Each rating shows the evidence and the math behind it. If there isn't enough data, CardVault says "Not enough data" instead of guessing.
 
-- **Rarity**: serial numbering, PSA population, market supply
-- **Collector Appeal**: rookie, 1st Bowman, auto, low serial, vintage, gem grade, bidding
-- **Demand**: sales volume, auction bidding, player attention
-- **Player Importance**: Wikipedia attention, Wikidata honours, MLB major awards, Hall of Fame
-- **Grading Potential**: PSA 10 premium over raw, gem rate (graded cards get *Grade Standing* instead)
-- **Market Liquidity**: sales volume, listing count, seller count, price spread
-- **Recent Momentum**: sale-price trend, new vs old asks, attention trend
+- **Rarity**: how many copies exist (serial numbering, PSA population, how many are for sale)
+- **Collector Appeal**: rookie cards, 1st Bowman, autographs, low serial numbers, vintage, gem grades
+- **Demand**: how often it sells, how hard people bid, how much attention the player gets
+- **Player Importance**: awards, Hall of Fame status and overall fame
+- **Grading Potential**: how much more a PSA 10 sells for than a raw copy, and how often the card grades gem mint (graded cards get **Grade Standing** instead)
+- **Market Liquidity**: how easy the card is to sell quickly at a fair price
+- **Recent Momentum**: whether prices and interest are trending up or down
 
-## Files
+## Where the data comes from
 
-- `server.py`: local server and API proxy (Python standard library only)
-- `static/scoring.js`: rating formulas and valuation
-- `static/app.js`: interface logic
-- `.env`: your keys (never share this file)
+- **eBay**: current listings and sold prices
+- **The Card API**: sold prices from eBay, Goldin and other auction houses
+- **PSA**: population reports and gem rates
+- **TCGplayer**: trading card game prices
+- **Wikipedia, Wikidata and MLB**: player profiles, awards and stats
+
+If no sales data is available for your card, you can enter sold prices you know of and CardVault will use them in its estimate.
